@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat History Viewer</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #0f172a;
+      --card: #111d35;
+      --accent: #38bdf8;
+      --muted: #94a3b8;
+      --user: #1d4ed8;
+      --assistant: #0f172a;
+      --border: #1f2a44;
+      --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI Variable", "Noto Sans", system-ui, -apple-system, sans-serif;
+      background: radial-gradient(120% 120% at 20% 20%, rgba(56, 189, 248, 0.08), transparent 50%), radial-gradient(80% 80% at 80% 0%, rgba(16, 185, 129, 0.06), transparent 50%), var(--bg);
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+    .app {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      min-height: 100vh;
+    }
+    .sidebar {
+      border-right: 1px solid var(--border);
+      background: linear-gradient(150deg, #0c1628, #0b1220 45%, #0c1628);
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
+    }
+    .logo {
+      font-weight: 700;
+      letter-spacing: 0.6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 17px;
+    }
+    .logo span {
+      color: var(--accent);
+    }
+    .picker {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: var(--shadow);
+    }
+    .picker label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px dashed var(--accent);
+      border-radius: 10px;
+      cursor: pointer;
+      color: var(--accent);
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.07);
+    }
+    .picker small {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+    }
+    .picker input[type="file"] {
+      display: none;
+    }
+    .search {
+      position: relative;
+    }
+    .search input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
+      color: #e2e8f0;
+      outline: none;
+    }
+    .search input::placeholder {
+      color: var(--muted);
+    }
+    .conversations {
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 4px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .conversation {
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 12px;
+      padding: 12px;
+      cursor: pointer;
+      transition: border-color 0.2s, transform 0.1s;
+    }
+    .conversation:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    .conversation.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3);
+      background: linear-gradient(140deg, rgba(56, 189, 248, 0.12), rgba(56, 189, 248, 0));
+    }
+    .conversation .title {
+      font-weight: 700;
+      margin-bottom: 6px;
+      color: #e2e8f0;
+    }
+    .conversation .meta {
+      color: var(--muted);
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .main {
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+    }
+    .header .text h1 {
+      margin: 0;
+      font-size: 20px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .header .text .meta {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 4px;
+    }
+    .pill {
+      background: rgba(56, 189, 248, 0.1);
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .lang-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 10px;
+      color: #cbd5e1;
+    }
+    .lang-switch select {
+      background: transparent;
+      border: none;
+      color: inherit;
+      font-weight: 600;
+      outline: none;
+    }
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-right: 8px;
+    }
+    .bubble {
+      padding: 14px 16px;
+      border-radius: 14px;
+      max-width: 900px;
+      line-height: 1.55;
+      position: relative;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      white-space: normal;
+      word-break: break-word;
+    }
+    .bubble.user {
+      background: linear-gradient(145deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0.04));
+      align-self: flex-end;
+      border-color: rgba(37, 99, 235, 0.5);
+    }
+    .bubble.assistant {
+      background: linear-gradient(145deg, rgba(56, 189, 248, 0.1), rgba(56, 189, 248, 0.02));
+    }
+    .bubble .meta {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .bubble .content {
+      color: #e2e8f0;
+    }
+    .bubble .content h1,
+    .bubble .content h2,
+    .bubble .content h3,
+    .bubble .content h4,
+    .bubble .content h5,
+    .bubble .content h6 {
+      margin: 0.4em 0 0.25em;
+      line-height: 1.3;
+    }
+    .bubble .content p {
+      margin: 0.25em 0 0.6em;
+    }
+    .bubble .content code {
+      background: rgba(148, 163, 184, 0.15);
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .bubble .content a {
+      color: var(--accent);
+    }
+    .bubble .content pre {
+      background: #0b1324;
+      padding: 12px;
+      border-radius: 10px;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      margin: 0.4em 0 0.6em;
+    }
+    .bubble .content pre code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      font-size: 13px;
+      display: block;
+      white-space: pre;
+    }
+    .bubble .content ul,
+    .bubble .content ol {
+      margin: 0.25em 0 0.6em 1.25em;
+      padding: 0;
+    }
+    .bubble .content blockquote {
+      margin: 0.4em 0;
+      padding-left: 12px;
+      border-left: 3px solid rgba(148, 163, 184, 0.5);
+      color: #cbd5e1;
+    }
+    .copy-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: #cbd5e1;
+      padding: 4px 8px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .copy-btn:hover {
+      border-color: var(--accent);
+      color: #e2e8f0;
+    }
+    .empty {
+      color: var(--muted);
+      text-align: center;
+      padding: 30px 0;
+    }
+    @media (max-width: 900px) {
+      .app { grid-template-columns: 1fr; }
+      .sidebar { flex-direction: column; order: 2; }
+      .main { order: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="logo"><span>◆</span>Chat History Viewer</div>
+      <div class="picker">
+        <label id="folderLabel" for="folderInput"></label>
+        <small id="folderHint"></small>
+        <input id="folderInput" type="file" webkitdirectory multiple>
+      </div>
+      <div class="search">
+        <input id="searchInput" type="search">
+      </div>
+      <div class="conversations" id="conversationList"></div>
+    </aside>
+    <main class="main">
+      <div class="header">
+        <div class="text">
+          <h1 id="conversationTitle"></h1>
+          <div class="meta" id="conversationMeta"></div>
+        </div>
+        <div class="pill" id="summary">0</div>
+        <div class="lang-switch">
+          <label for="languageSelect">🌐</label>
+          <select id="languageSelect">
+            <option value="zh">中文</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+      </div>
+      <section class="messages" id="messageList">
+        <div class="empty" id="emptyState"></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const translations = {
+      zh: {
+        selectFolder: "选择聊天记录文件夹",
+        selectFolderHint: "支持直接选择导出的 JSON 文件夹，自动批量加载。",
+        searchPlaceholder: "搜索标题或文件名",
+        selectConversation: "请选择会话",
+        waiting: "等待加载聊天记录",
+        summaryLabel: "{count} 会话",
+        emptySelection: "尚未选择会话",
+        loading: "加载中…",
+        noValid: "未解析到有效的聊天记录",
+        noMatch: "没有匹配的会话",
+        conversationEmpty: "该会话暂无可展示的消息",
+        messageCountShort: "{count} 条",
+        conversationSummary: "{count} 条消息 · 更新于 {date}",
+        copy: "复制",
+        copied: "已复制",
+        copyFailed: "复制失败，请手动复制。",
+        imagePlaceholder: "[图片]",
+        roleUser: "用户",
+        roleAssistant: "助手",
+        roleUnknown: "其他",
+        noJsonFound: "未找到 JSON 文件，请重新选择导出的聊天记录文件夹。",
+        parseFailed: "无法解析 JSON",
+      },
+      en: {
+        selectFolder: "Choose chat history folder",
+        selectFolderHint: "Select the exported JSON folder to bulk load conversations.",
+        searchPlaceholder: "Search title or filename",
+        selectConversation: "Select a conversation",
+        waiting: "Waiting to load chat history",
+        summaryLabel: "{count} conversations",
+        emptySelection: "No conversation selected",
+        loading: "Loading…",
+        noValid: "No valid chats parsed",
+        noMatch: "No matching conversations",
+        conversationEmpty: "This conversation has no messages to show",
+        messageCountShort: "{count} msgs",
+        conversationSummary: "{count} messages · Updated {date}",
+        copy: "Copy",
+        copied: "Copied",
+        copyFailed: "Copy failed, please copy manually.",
+        imagePlaceholder: "[Image]",
+        roleUser: "User",
+        roleAssistant: "Assistant",
+        roleUnknown: "Other",
+        noJsonFound: "No JSON files found. Please pick the exported chat history folder.",
+        parseFailed: "Failed to parse JSON",
+      },
+    };
+    const locales = { zh: "zh-CN", en: "en-US" };
+    let currentLang = (() => {
+      const stored = localStorage.getItem("viewerLang");
+      if (stored && translations[stored]) return stored;
+      const nav = (navigator.language || "").toLowerCase();
+      return nav.startsWith("zh") ? "zh" : "en";
+    })();
+
+    function t(key, vars) {
+      const template = translations[currentLang]?.[key] ?? translations.en[key] ?? key;
+      if (typeof template === "function") return template(vars);
+      if (!vars) return template;
+      return template.replace(/\{(\w+)\}/g, (_, k) => (vars[k] !== undefined ? vars[k] : ""));
+    }
+
+    function getLocale() {
+      return locales[currentLang] || "en-US";
+    }
+
+    const state = {
+      conversations: [],
+      filtered: [],
+      activeId: null,
+    };
+
+    const folderInput = document.getElementById("folderInput");
+    const folderLabel = document.getElementById("folderLabel");
+    const folderHint = document.getElementById("folderHint");
+    const searchInput = document.getElementById("searchInput");
+    const conversationList = document.getElementById("conversationList");
+    const messageList = document.getElementById("messageList");
+    const conversationTitle = document.getElementById("conversationTitle");
+    const conversationMeta = document.getElementById("conversationMeta");
+    const summary = document.getElementById("summary");
+    const emptyState = document.getElementById("emptyState");
+    const languageSelect = document.getElementById("languageSelect");
+
+    folderInput.addEventListener("change", handleFolderSelect);
+    searchInput.addEventListener("input", handleSearch);
+    languageSelect.addEventListener("change", (e) => setLanguage(e.target.value));
+    updateStaticText();
+    renderEmptySelection();
+
+    async function handleFolderSelect(event) {
+      const files = Array.from(event.target.files || []).filter(f => f.name.endsWith(".json"));
+      if (!files.length) {
+        alert(t("noJsonFound"));
+        return;
+      }
+      conversationList.innerHTML = `<div class="empty">${t("loading")}</div>`;
+      const loaded = [];
+      for (const file of files) {
+        const conv = await parseConversationFile(file);
+        if (conv) loaded.push(conv);
+      }
+      state.conversations = loaded.sort((a, b) => b.updatedAt - a.updatedAt);
+      state.filtered = state.conversations;
+      renderConversationList();
+      summary.textContent = t("summaryLabel", { count: state.conversations.length });
+      if (state.conversations.length) {
+        setActiveConversation(state.conversations[0].id);
+      } else {
+        messageList.innerHTML = `<div class="empty">${t("noValid")}</div>`;
+      }
+    }
+
+    async function parseConversationFile(file) {
+      const text = await file.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        console.warn(t("parseFailed"), file.name, err);
+        return null;
+      }
+      const mapping = data.mapping || {};
+      const chain = buildMessageChain(mapping, data.current_node);
+      const messages = chain.map(normalizeMessage).filter(Boolean);
+      const title = data.title || file.name.replace(/\.json$/i, "");
+      const updatedAt = data.update_time ? new Date(data.update_time * 1000) : new Date(file.lastModified);
+      const createdAt = data.create_time ? new Date(data.create_time * 1000) : new Date(file.lastModified);
+      return {
+        id: data.conversation_id || file.name,
+        title,
+        fileName: file.name,
+        createdAt,
+        updatedAt,
+        messages,
+      };
+    }
+
+    function buildMessageChain(mapping, leafId) {
+      if (!mapping || typeof mapping !== "object") return [];
+      const nodes = mapping;
+      const visited = new Set();
+      const chain = [];
+      const fallbackLeaf = Object.keys(nodes).find(key => nodes[key]?.children?.length === 0 && nodes[key].message);
+      let current = leafId || fallbackLeaf;
+      while (current && !visited.has(current)) {
+        const node = nodes[current];
+        if (!node) break;
+        if (node.message) chain.push(node.message);
+        visited.add(current);
+        current = node.parent;
+      }
+      return chain.reverse();
+    }
+
+    function normalizeMessage(msg) {
+      if (!msg || !msg.content) return null;
+      const role = msg.author?.role || "unknown";
+      const time = msg.create_time ? new Date(msg.create_time * 1000) : null;
+      const parts = Array.isArray(msg.content.parts) ? msg.content.parts : [];
+      const text = parts.map(part => formatPart(part)).filter(Boolean).join("\n\n").trim();
+      if (!text) return null;
+      return {
+        id: msg.id,
+        role,
+        time,
+        text,
+      };
+    }
+
+    function formatPart(part) {
+      if (typeof part === "string") return part;
+      if (part?.text) return part.text;
+      if (part?.content) return part.content;
+      if (part?.type === "image_url" && part.image_url?.url) return `${t("imagePlaceholder")} ${part.image_url.url}`;
+      try {
+        return JSON.stringify(part);
+      } catch (_) {
+        return "";
+      }
+    }
+
+    function handleSearch(event) {
+      const term = event.target.value.toLowerCase();
+      state.filtered = state.conversations.filter(c => {
+        const target = `${c.title} ${c.fileName}`.toLowerCase();
+        return target.includes(term);
+      });
+      renderConversationList();
+    }
+
+    function renderConversationList() {
+      conversationList.innerHTML = "";
+      if (!state.filtered.length) {
+        conversationList.innerHTML = `<div class="empty">${t("noMatch")}</div>`;
+        return;
+      }
+      state.filtered.forEach(conv => {
+        const div = document.createElement("div");
+        div.className = `conversation ${state.activeId === conv.id ? "active" : ""}`;
+        div.innerHTML = `
+          <div class="title">${escapeHtml(conv.title)}</div>
+          <div class="meta">
+            <span>${formatDate(conv.updatedAt)}</span>
+            <span>${t("messageCountShort", { count: conv.messages.length })}</span>
+          </div>
+        `;
+        div.onclick = () => setActiveConversation(conv.id);
+        conversationList.appendChild(div);
+      });
+    }
+
+    function setActiveConversation(id) {
+      state.activeId = id;
+      renderConversationList();
+      const conv = state.conversations.find(c => c.id === id);
+      if (!conv) return;
+      conversationTitle.textContent = conv.title;
+      conversationMeta.textContent = t("conversationSummary", { count: conv.messages.length, date: formatDate(conv.updatedAt) });
+      renderMessages(conv.messages);
+    }
+
+    function renderMessages(messages) {
+      messageList.innerHTML = "";
+      if (!messages.length) {
+        messageList.innerHTML = `<div class="empty">${t("conversationEmpty")}</div>`;
+        return;
+      }
+      messages.forEach(msg => {
+        const div = document.createElement("div");
+        div.className = `bubble ${msg.role === "user" ? "user" : "assistant"}`;
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const roleLabel = getRoleLabel(msg.role);
+        meta.textContent = `${roleLabel}${msg.time ? " · " + formatDateTime(msg.time) : ""}`;
+        const body = document.createElement("div");
+        body.className = "content";
+        body.innerHTML = renderMarkdown(adjustNewlines(msg.text));
+        const copy = document.createElement("button");
+        copy.className = "copy-btn";
+        copy.textContent = t("copy");
+        copy.onclick = () => copyText(msg.text, copy);
+        div.appendChild(meta);
+        div.appendChild(body);
+        div.appendChild(copy);
+        messageList.appendChild(div);
+      });
+    }
+
+    function copyText(text, button) {
+      navigator.clipboard.writeText(text).then(() => {
+        const prev = button.textContent;
+        button.textContent = t("copied");
+        setTimeout(() => (button.textContent = prev), 1200);
+      }).catch(() => {
+        alert(t("copyFailed"));
+      });
+    }
+
+    function renderMarkdown(md) {
+      if (!md) return "";
+      const placeholders = [];
+      const withCodeBlocks = md.replace(/```(\w+)?\n([\s\S]*?)```/g, (_, lang, code) => {
+        const idx = placeholders.length;
+        placeholders.push(`<pre><code class="lang-${lang || "text"}">${escapeHtml(code)}</code></pre>`);
+        return `\uFFF0${idx}\uFFF0`;
+      });
+      const lines = withCodeBlocks.replace(/\r\n/g, "\n").split("\n");
+      const html = [];
+      let inList = false;
+      let para = [];
+      const flushPara = () => {
+        if (!para.length) return;
+        html.push(`<p>${para.join("<br>")}</p>`);
+        para = [];
+      };
+
+      lines.forEach(line => {
+        const trimmed = line.trimEnd();
+        const isList = /^\s*[-*+]\s+/.test(trimmed);
+        const isHeading = trimmed.match(/^(#{1,6})\s+(.*)$/);
+        const isQuote = trimmed.match(/^>\s?(.*)$/);
+        const isHr = /^\s*-{3,}\s*$/.test(trimmed);
+        const isBlank = trimmed === "";
+
+        if (isBlank) {
+          if (inList) {
+            html.push("</ul>");
+            inList = false;
+          }
+          flushPara();
+          return;
+        }
+
+        if (isList) {
+          flushPara();
+          if (!inList) {
+            html.push("<ul>");
+            inList = true;
+          }
+          html.push(`<li>${renderInline(trimmed.replace(/^\s*[-*+]\s+/, ""))}</li>`);
+          return;
+        }
+
+        if (inList) {
+          html.push("</ul>");
+          inList = false;
+        }
+
+        if (isHr) {
+          flushPara();
+          html.push("<hr>");
+          return;
+        }
+
+        if (isHeading) {
+          flushPara();
+          const level = isHeading[1].length;
+          html.push(`<h${level}>${renderInline(isHeading[2])}</h${level}>`);
+          return;
+        }
+
+        if (isQuote) {
+          flushPara();
+          html.push(`<blockquote>${renderInline(isQuote[1])}</blockquote>`);
+          return;
+        }
+
+        para.push(renderInline(trimmed));
+      });
+
+      if (inList) html.push("</ul>");
+      flushPara();
+
+      return html.join("\n").replace(/\uFFF0(\d+)\uFFF0/g, (_, i) => placeholders[Number(i)] || "");
+    }
+
+    function renderInline(text) {
+      let out = escapeHtml(text);
+      out = out.replace(/`([^`]+)`/g, (_, code) => `<code>${code}</code>`);
+      out = out.replace(/\*\*([^*]+)\*\*/g, (_, bold) => `<strong>${bold}</strong>`);
+      out = out.replace(/\*([^*]+)\*/g, (_, italic) => `<em>${italic}</em>`);
+      out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, label, url) => `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`);
+      return out;
+    }
+
+    function adjustNewlines(text) {
+      if (!text) return text;
+      return text.replace(/\r\n/g, "\n");
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>\"']/g, s => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[s]));
+    }
+
+    function escapeAttr(str) {
+      return String(str).replace(/"/g, "&quot;");
+    }
+
+    function formatDate(date) {
+      if (!date) return "";
+      return date.toLocaleDateString(getLocale(), { month: "short", day: "numeric" });
+    }
+
+    function formatDateTime(date) {
+      if (!date) return "";
+      return date.toLocaleString(getLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    }
+
+    function getRoleLabel(role) {
+      if (role === "user") return t("roleUser");
+      if (role === "assistant") return t("roleAssistant");
+      return t("roleUnknown");
+    }
+
+    function updateStaticText() {
+      folderLabel.textContent = t("selectFolder");
+      folderHint.textContent = t("selectFolderHint");
+      searchInput.placeholder = t("searchPlaceholder");
+      if (!state.activeId) {
+        conversationTitle.textContent = t("selectConversation");
+        conversationMeta.textContent = t("waiting");
+      }
+      summary.textContent = t("summaryLabel", { count: state.conversations.length });
+      languageSelect.value = currentLang;
+      document.documentElement.lang = getLocale();
+    }
+
+    function renderEmptySelection() {
+      messageList.innerHTML = `<div class="empty">${t("emptySelection")}</div>`;
+    }
+
+    function setLanguage(lang) {
+      currentLang = translations[lang] ? lang : "en";
+      localStorage.setItem("viewerLang", currentLang);
+      updateStaticText();
+      renderConversationList();
+      if (state.activeId) {
+        setActiveConversation(state.activeId);
+      } else {
+        renderEmptySelection();
+      }
+    }
+  </script>
+</body>
+</html>
