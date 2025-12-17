@@ -56,6 +56,63 @@
       padding: 12px;
       box-shadow: var(--shadow);
     }
+    .folder-list {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      box-shadow: var(--shadow);
+    }
+    .folder-list .title {
+      color: #e2e8f0;
+      font-weight: 600;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .folder-list .empty {
+      text-align: left;
+      padding: 6px 0;
+      margin: 0;
+    }
+    .folder-chip {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      gap: 8px;
+    }
+    .folder-chip .name {
+      font-weight: 600;
+      color: #e2e8f0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .folder-chip .meta {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .folder-chip button {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: #cbd5e1;
+      border-radius: 8px;
+      padding: 5px 8px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .folder-chip button:hover {
+      border-color: var(--accent);
+      color: #e2e8f0;
+    }
     .picker label {
       display: inline-flex;
       align-items: center;
@@ -301,6 +358,7 @@
         <small id="folderHint"></small>
         <input id="folderInput" type="file" webkitdirectory multiple>
       </div>
+      <div class="folder-list" id="folderList"></div>
       <div class="search">
         <input id="searchInput" type="search">
       </div>
@@ -328,14 +386,17 @@
   </div>
 
   <script>
-    const translations = {
+        const translations = {
       zh: {
         selectFolder: "选择聊天记录文件夹",
-        selectFolderHint: "支持直接选择导出的 JSON 文件夹，自动批量加载。",
+        selectFolderHint: "支持同时选择多个导出的 JSON 文件夹，批量加载。",
+        selectedFolders: "已选择文件夹",
+        noFolder: "尚未添加文件夹",
+        remove: "移除",
         searchPlaceholder: "搜索标题或文件名",
         selectConversation: "请选择会话",
         waiting: "等待加载聊天记录",
-        summaryLabel: "{count} 会话",
+        summaryLabel: "{count} 个会话",
         emptySelection: "尚未选择会话",
         loading: "加载中…",
         noValid: "未解析到有效的聊天记录",
@@ -355,18 +416,21 @@
       },
       en: {
         selectFolder: "Choose chat history folder",
-        selectFolderHint: "Select the exported JSON folder to bulk load conversations.",
+        selectFolderHint: "You can pick multiple exported JSON folders to load together.",
+        selectedFolders: "Selected folders",
+        noFolder: "No folders yet",
+        remove: "Remove",
         searchPlaceholder: "Search title or filename",
         selectConversation: "Select a conversation",
         waiting: "Waiting to load chat history",
         summaryLabel: "{count} conversations",
         emptySelection: "No conversation selected",
-        loading: "Loading…",
+        loading: "Loading?",
         noValid: "No valid chats parsed",
         noMatch: "No matching conversations",
         conversationEmpty: "This conversation has no messages to show",
         messageCountShort: "{count} msgs",
-        conversationSummary: "{count} messages · Updated {date}",
+        conversationSummary: "{count} messages ? Updated {date}",
         copy: "Copy",
         copied: "Copied",
         copyFailed: "Copy failed, please copy manually.",
@@ -401,11 +465,13 @@
       conversations: [],
       filtered: [],
       activeId: null,
+      folders: [],
     };
 
     const folderInput = document.getElementById("folderInput");
     const folderLabel = document.getElementById("folderLabel");
     const folderHint = document.getElementById("folderHint");
+    const folderList = document.getElementById("folderList");
     const searchInput = document.getElementById("searchInput");
     const conversationList = document.getElementById("conversationList");
     const messageList = document.getElementById("messageList");
@@ -420,6 +486,7 @@
     languageSelect.addEventListener("change", (e) => setLanguage(e.target.value));
     updateStaticText();
     renderEmptySelection();
+    renderFolderList();
 
     async function handleFolderSelect(event) {
       const files = Array.from(event.target.files || []).filter(f => f.name.endsWith(".json"));
@@ -428,23 +495,45 @@
         return;
       }
       conversationList.innerHTML = `<div class="empty">${t("loading")}</div>`;
-      const loaded = [];
-      for (const file of files) {
-        const conv = await parseConversationFile(file);
-        if (conv) loaded.push(conv);
+      const grouped = groupFilesByFolder(files);
+      let loadedAny = false;
+      for (const [folderName, folderFiles] of grouped.entries()) {
+        const ok = await loadFolder(folderName, folderFiles);
+        loadedAny = loadedAny || ok;
       }
-      state.conversations = loaded.sort((a, b) => b.updatedAt - a.updatedAt);
-      state.filtered = state.conversations;
-      renderConversationList();
-      summary.textContent = t("summaryLabel", { count: state.conversations.length });
-      if (state.conversations.length) {
-        setActiveConversation(state.conversations[0].id);
-      } else {
+      event.target.value = "";
+      refreshConversations();
+      if (!loadedAny && !state.conversations.length) {
         messageList.innerHTML = `<div class="empty">${t("noValid")}</div>`;
       }
     }
 
-    async function parseConversationFile(file) {
+    function groupFilesByFolder(files) {
+      const map = new Map();
+      files.forEach(file => {
+        const rel = file.webkitRelativePath || file.name;
+        const folderName = (rel.split(/[/\\\\]/)[0] || "folder").trim() || "folder";
+        if (!map.has(folderName)) map.set(folderName, []);
+        map.get(folderName).push(file);
+      });
+      return map;
+    }
+
+    async function loadFolder(folderName, files) {
+      const loaded = [];
+      for (const file of files) {
+        const conv = await parseConversationFile(file, folderName);
+        if (conv) loaded.push(conv);
+      }
+      if (!loaded.length) return false;
+      state.conversations = state.conversations.filter(c => c.folder !== folderName);
+      state.folders = state.folders.filter(f => f.name !== folderName);
+      state.conversations.push(...loaded);
+      state.folders.push({ name: folderName, count: loaded.length });
+      return true;
+    }
+
+    async function parseConversationFile(file, folderName) {
       const text = await file.text();
       let data;
       try {
@@ -455,17 +544,24 @@
       }
       const mapping = data.mapping || {};
       const chain = buildMessageChain(mapping, data.current_node);
-      const messages = chain.map(normalizeMessage).filter(Boolean);
+      const messages = chain.map(normalizeMessage).map((msg, idx) => msg ? { ...msg, order: idx } : null).filter(Boolean);
+      messages.sort((a, b) => {
+        const ta = a.time ? a.time.getTime() : Number.MAX_SAFE_INTEGER;
+        const tb = b.time ? b.time.getTime() : Number.MAX_SAFE_INTEGER;
+        if (ta === tb) return a.order - b.order;
+        return ta - tb;
+      });
       const title = data.title || file.name.replace(/\.json$/i, "");
       const updatedAt = data.update_time ? new Date(data.update_time * 1000) : new Date(file.lastModified);
       const createdAt = data.create_time ? new Date(data.create_time * 1000) : new Date(file.lastModified);
       return {
-        id: data.conversation_id || file.name,
+        id: `${folderName}:${data.conversation_id || file.name}`,
         title,
         fileName: file.name,
         createdAt,
         updatedAt,
-        messages,
+        messages: messages.map(({ order, ...rest }) => rest),
+        folder: folderName,
       };
     }
 
@@ -513,19 +609,56 @@
       }
     }
 
-    function handleSearch(event) {
-      const term = event.target.value.toLowerCase();
+    function applySearch(value) {
+      const term = (value || "").toLowerCase();
       state.filtered = state.conversations.filter(c => {
-        const target = `${c.title} ${c.fileName}`.toLowerCase();
+        const target = `${c.title} ${c.fileName} ${c.folder}`.toLowerCase();
         return target.includes(term);
       });
+      return state.filtered;
+    }
+
+    function handleSearch(event) {
+      applySearch(event.target.value);
       renderConversationList();
+      summary.textContent = t("summaryLabel", { count: state.conversations.length });
+      if (state.filtered.length) {
+        if (!state.filtered.some(c => c.id === state.activeId)) {
+          setActiveConversation(state.filtered[0].id);
+        }
+      } else {
+        state.activeId = null;
+        conversationTitle.textContent = t("selectConversation");
+        conversationMeta.textContent = t("waiting");
+        renderEmptySelection();
+      }
+    }
+
+    function refreshConversations() {
+      state.conversations.sort((a, b) => b.updatedAt - a.updatedAt);
+      applySearch(searchInput.value);
+      renderConversationList();
+      renderFolderList();
+      summary.textContent = t("summaryLabel", { count: state.conversations.length });
+      if (state.filtered.length) {
+        if (!state.filtered.some(c => c.id === state.activeId)) {
+          setActiveConversation(state.filtered[0].id);
+        } else {
+          setActiveConversation(state.activeId);
+        }
+      } else {
+        state.activeId = null;
+        conversationTitle.textContent = t("selectConversation");
+        conversationMeta.textContent = t("waiting");
+        renderEmptySelection();
+      }
     }
 
     function renderConversationList() {
       conversationList.innerHTML = "";
       if (!state.filtered.length) {
-        conversationList.innerHTML = `<div class="empty">${t("noMatch")}</div>`;
+        const emptyLabel = state.conversations.length ? t("noMatch") : t("noValid");
+        conversationList.innerHTML = `<div class="empty">${emptyLabel}</div>`;
         return;
       }
       state.filtered.forEach(conv => {
@@ -536,6 +669,7 @@
           <div class="meta">
             <span>${formatDate(conv.updatedAt)}</span>
             <span>${t("messageCountShort", { count: conv.messages.length })}</span>
+            <span>${escapeHtml(conv.folder)}</span>
           </div>
         `;
         div.onclick = () => setActiveConversation(conv.id);
@@ -543,11 +677,54 @@
       });
     }
 
+    function renderFolderList() {
+      folderList.innerHTML = "";
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = t("selectedFolders");
+      folderList.appendChild(title);
+      if (!state.folders.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = t("noFolder");
+        folderList.appendChild(empty);
+        return;
+      }
+      state.folders.forEach(folder => {
+        const chip = document.createElement("div");
+        chip.className = "folder-chip";
+        const name = document.createElement("div");
+        name.className = "name";
+        name.textContent = folder.name;
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = t("summaryLabel", { count: folder.count });
+        const btn = document.createElement("button");
+        btn.textContent = t("remove");
+        btn.onclick = () => removeFolder(folder.name);
+        chip.appendChild(name);
+        chip.appendChild(meta);
+        chip.appendChild(btn);
+        folderList.appendChild(chip);
+      });
+    }
+
+    function removeFolder(folderName) {
+      const activeRemoved = state.conversations.some(c => c.folder === folderName && c.id === state.activeId);
+      state.conversations = state.conversations.filter(c => c.folder !== folderName);
+      state.folders = state.folders.filter(f => f.name !== folderName);
+      if (activeRemoved) state.activeId = null;
+      refreshConversations();
+    }
+
     function setActiveConversation(id) {
       state.activeId = id;
       renderConversationList();
       const conv = state.conversations.find(c => c.id === id);
-      if (!conv) return;
+      if (!conv) {
+        renderEmptySelection();
+        return;
+      }
       conversationTitle.textContent = conv.title;
       conversationMeta.textContent = t("conversationSummary", { count: conv.messages.length, date: formatDate(conv.updatedAt) });
       renderMessages(conv.messages);
@@ -721,6 +898,7 @@
         conversationMeta.textContent = t("waiting");
       }
       summary.textContent = t("summaryLabel", { count: state.conversations.length });
+      renderFolderList();
       languageSelect.value = currentLang;
       document.documentElement.lang = getLocale();
     }
