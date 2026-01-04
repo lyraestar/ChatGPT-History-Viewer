@@ -545,10 +545,21 @@
       const mapping = data.mapping || {};
       const chain = buildMessageChain(mapping, data.current_node);
       const messages = chain.map(normalizeMessage).map((msg, idx) => msg ? { ...msg, order: idx } : null).filter(Boolean);
+      const rolePriority = { user: 0, assistant: 1, unknown: 2 };
+      const getSortTime = (msg) => {
+        if (msg.role === "assistant" && msg.updatedTime) return msg.updatedTime.getTime();
+        if (msg.time) return msg.time.getTime();
+        return Number.MAX_SAFE_INTEGER;
+      };
       messages.sort((a, b) => {
-        const ta = a.time ? a.time.getTime() : Number.MAX_SAFE_INTEGER;
-        const tb = b.time ? b.time.getTime() : Number.MAX_SAFE_INTEGER;
-        if (ta === tb) return a.order - b.order;
+        const ta = getSortTime(a);
+        const tb = getSortTime(b);
+        if (ta === tb) {
+          const ra = rolePriority[a.role] ?? 3;
+          const rb = rolePriority[b.role] ?? 3;
+          if (ra !== rb) return ra - rb;
+          return a.order - b.order;
+        }
         return ta - tb;
       });
       const title = data.title || file.name.replace(/\.json$/i, "");
@@ -586,6 +597,7 @@
       if (!msg || !msg.content) return null;
       const role = msg.author?.role || "unknown";
       const time = msg.create_time ? new Date(msg.create_time * 1000) : null;
+      const updatedTime = msg.update_time ? new Date(msg.update_time * 1000) : null;
       const parts = Array.isArray(msg.content.parts) ? msg.content.parts : [];
       const text = parts.map(part => formatPart(part)).filter(Boolean).join("\n\n").trim();
       if (!text) return null;
@@ -593,6 +605,7 @@
         id: msg.id,
         role,
         time,
+        updatedTime,
         text,
       };
     }
